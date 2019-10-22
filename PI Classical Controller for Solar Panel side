@@ -1,0 +1,104 @@
+#include <Wire.h>
+#include <LCD.h>
+#include <LiquidCrystal_I2C.h>
+LiquidCrystal_I2C  lcd(0x27, 2, 1, 0, 4, 5, 6, 7);// Connection of LCD SDA to A4 and SCL to A5
+#include <TimerOne.h>
+
+//////////////////////////////FUNCTION/////////////////////// ``/////////////////////////////////////////
+double VoltageX(void);
+void LCD_Display(double V_1, double D_1);
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+#define Volt  A0 //raed the voltage at A0
+#define Current  A1 //Read the cuurent at A1
+double V, I, P, Control_Signal , Error, Error_prev;
+double Ki = 0.5; //boost mode
+double Kp = 0.02;
+double K_p = 0.2; //buck mode
+double K_i = 1;
+double V_ref = 24;
+double Dc = 60;
+int pulsePin ;
+float inputFreq = 5000;
+float Freq;
+
+
+void setup() {
+  pinMode(9, OUTPUT); //buck
+  pinMode(4, OUTPUT);//boost
+   digitalWrite(4, HIGH);//boost
+  Freq = (1 / inputFreq) * 1000000;
+  Timer1.initialize(Freq);
+  Serial.begin(9600);
+
+  pinMode(Volt, INPUT);
+  pinMode(Current, INPUT);
+
+  lcd.begin (16, 4); //Four Line and 16 word per line of LCD
+  lcd.setBacklightPin(3, POSITIVE);
+  lcd.setBacklight(HIGH);
+
+  double D ;
+
+  while (true) {
+    V =  VoltageX();
+    //////////////////////////////PID/////////////////////////////////
+    Error = V_ref - V;
+
+    I =  Error + Error_prev;
+    Control_Signal = Kp * Error + Ki * I;
+    Error_prev = I;
+    double Control =   constrain(Control_Signal, 0, 60);
+    D =    map(Control, 0, 60, 0, Dc);
+
+    Timer1.pwm( 10, 10 * D);
+    //////////////////////////////////////////////////////////////////
+    LCD_Display(V, D);
+    Serial.println(V);
+    delay(100);
+
+  }
+}
+
+
+void loop() {
+
+}
+
+
+
+/////////////////////////VOLT-01////////////////////////
+
+double VoltageX(void) {
+  double X = analogRead(Volt);
+  double Vx = (115 * X) / 1024.0+0.5; //forvoltage dividor 1M and 100K
+  if (Vx < 0.1)
+  {
+    Vx = 0.0;
+  }
+  return Vx;
+}
+
+
+
+
+/////////////////////////////LCD////////////////////////////////////
+
+void LCD_Display(double V_1, double D_1) {
+
+  lcd.setCursor(0, 0);
+  lcd.print("Volt    |");
+  lcd.setCursor(9, 0);
+  lcd.print(V_1);
+  lcd.setCursor(14, 0);
+  lcd.print("V");
+
+
+  lcd.setCursor(0, 1);
+
+  lcd.print("Duty    |");
+  lcd.setCursor(9, 1);
+  lcd.print(D_1);
+  lcd.setCursor(14, 1);
+  lcd.print("%");
+}
