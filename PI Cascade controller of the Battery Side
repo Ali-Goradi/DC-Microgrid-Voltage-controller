@@ -1,0 +1,211 @@
+#include <Wire.h>
+#include <LCD.h>
+#include <LiquidCrystal_I2C.h>
+LiquidCrystal_I2C  lcd(0x27, 2, 1, 0, 4, 5, 6, 7);// Connection of LCD SDA to A4 and SCL to A5
+#include <TimerOne.h>
+
+//////////////////////////////FUNCTION/////////////////////// ``/////////////////////////////////////////
+double VoltageX(void);
+double CurrentX(void);
+void LCD_Display(double V_1, double C_1, int D_1, int D_2, int x);
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+#define Volt  A0 //raed the voltage at A0
+#define Current  A1
+double V, I, Control_Signal , Error, Error_prev, D, Dx, C, C_ref;
+double Ki = 0.1; //Voltage mode
+double Kp = 0.02;
+double Kp2 = 2.; //Current mode
+double Ki2 = 0.001;
+double V_ref = 48 ;
+double Kp3 = 0.02; //Buck mode
+double Ki3 = 0.2;
+double Dc = 80;
+double Vt = 0.5;
+
+int state ;
+float inputFreq = 5000;
+float Freq;
+
+
+void setup() {
+  pinMode(9, OUTPUT);
+  pinMode(10, OUTPUT);
+  Freq = (1 / inputFreq) * 1000000;
+  Timer1.initialize(Freq);
+  Serial.begin(9600);
+
+  lcd.begin (16, 4); //Four Line and 16 word per line of LCD
+  lcd.setBacklightPin(3, POSITIVE);
+  lcd.setBacklight(HIGH);
+
+  Error_prev = 0.0;
+  double  Error_prev2 = 0.0;
+  double Error_prev3 = 0.0;
+  delay(100);
+
+  while (true) {
+
+    V =  VoltageX();
+    //////////////////////////////Boost/////////////////////////////////
+    C = CurrentX();
+    Error = V_ref - V;
+    I =  Error + Error_prev;
+    Control_Signal = (Kp * Error + Ki * I);
+    Error_prev = I;
+    double C_ref =   constrain(Control_Signal, 0, 100);
+    double Error2 = C_ref - C;
+    double I2 =  Error2 + Error_prev2;
+    double Control_Signal2 = (Kp2 * Error2 + Ki2 * I2);
+    Error_prev2 = I2;
+    double Control2 =   constrain(Control_Signal2, 0, 100);
+    double D =    map(Control2, 0, 100, 0, Dc);
+
+    /////////////////////buck/////////////////////////////////////////////////
+    double Error3 =  V_ref - V;
+    double I3 =  Error3 + Error_prev3;
+    double Control_Signal3 = (Kp3 * Error3 + Ki3 * I3);
+    Error_prev3 = I3;
+    double Control3 =   constrain(Control_Signal3, 0, 100);
+    double Dx =    map(Control3, 0, 100, 15, 50);
+    int sig = digitalRead(7);
+
+    delay(100);
+
+    if (sig == 0) {
+      if (V > (V_ref - Vt) && V < (V_ref + Vt)) {
+        delay(1000);
+      }
+      else {
+        digitalWrite(9, LOW);
+        state = 0;
+        Timer1.pwm( 10, 10 * D);
+        Serial.print("Boost: ");
+        LCD_Display(V, C, D, Dx, state);
+        delay(100);
+      }
+    }
+
+
+    else {
+      if (V > (V_ref + Vt) ) {
+        digitalWrite(10, LOW);
+        state = 1;
+        Timer1.pwm( 9, 10 * Dx);
+        Serial.print("Buck: ");
+        LCD_Display(V, C, D, Dx, state);
+        delay(100);
+      }
+      else if (V < (V_ref - Vt)) {
+        digitalWrite(9, LOW);
+        state = 0;
+        Timer1.pwm( 10, 10 * D);
+        Serial.print("Boost: ");
+        LCD_Display(V, C, D, Dx, state);
+        delay(100);
+      }
+      else {
+        delay(1000);
+      }
+    }
+
+
+    delay(10);
+    Serial.print("Error: ");
+    Serial.print(Error);
+    Serial.print("     ");
+    Serial.print("Control_Signal: ");
+    Serial.print(Control_Signal);
+    Serial.print("     ");
+    Serial.print("D: ");
+    Serial.print(D);
+    Serial.print("     ");
+    Serial.print("V: ");
+    Serial.print(V);
+    Serial.print("     ");
+    Serial.print("Signal: ");
+    Serial.println(sig);
+
+  }
+
+}
+
+
+void loop() {}
+
+/////////////////////////////SOC////////////////////////////////
+
+
+/////////////////////////VOLT-01////////////////////////
+
+double VoltageX(void) {
+  double X = analogRead(Volt);
+  double Vx = (115 * X) / 1024.0; //forvoltage dividor 1M and 100K
+  if (Vx < 0.1)
+  {
+    Vx = 0.0;
+  }
+  return Vx;
+}
+
+////////////////////////////////ACS712////////////////////////////////
+
+double CurrentX(void) {
+  double Y = analogRead(Current);
+  double Y1 = (5000 * Y) / (1024.0) ;
+  double Ix = ((Y1 - 2500) / 100.0); // Change 100.0 to 66.0 if the sensor 30A
+  double I2 = constrain(Ix, -20, 20);
+  if (I2 < 0.1)
+  {
+    I2 = 0.0;
+  }
+  return I2;
+}
+
+
+
+/////////////////////////////LCD////////////////////////////////////
+
+void LCD_Display(double V_1, double C_1, int D_1, int D_2, int x) {
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print(V_1);
+  lcd.setCursor(5, 0);
+  lcd.print("V");
+
+  lcd.setCursor(8, 0);
+  lcd.print(C_1);
+  lcd.setCursor(14, 0);
+  lcd.print("A");
+
+  lcd.setCursor(0, 1);
+  lcd.print("Boost:");
+  lcd.setCursor(9, 1);
+  lcd.print(D_1);
+  lcd.setCursor(15, 1);
+  lcd.print("%");
+
+  lcd.setCursor(0, 2);
+  lcd.print("Buck ");
+  lcd.setCursor(9, 2);
+  lcd.print(D_2);
+  lcd.setCursor(15, 2);
+  lcd.print("%");
+
+  if (x == 1) {
+    lcd.setCursor(0, 3);
+    lcd.print("State: ");
+    lcd.setCursor(8, 3);
+    lcd.print("Buck");
+
+  }
+  else {
+    lcd.setCursor(0, 3);
+    lcd.print("State: ");
+    lcd.setCursor(8, 3);
+    lcd.print("Boost");
+  }
+
+}
+
